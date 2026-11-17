@@ -3,10 +3,11 @@
 import { HEAL_SECONDS, MAGAZINE } from './actors';
 import { LABEL_FONT, raidZoom } from './draw';
 import type { RaidView } from './draw';
+import type { Fx } from './fx';
 import { EXTRACT_SECONDS, RAID_SECONDS } from './sim';
 import type { Stash } from './stash';
 import type { RaidPhase, RaidState } from './types';
-import { EXTRACTS, PIER, ROOMS, WORLD, shorelineY } from './world';
+import { EXTRACTS, PIER, ROOMS, WORLD, inCellars, shorelineY } from './world';
 
 const TITLE_FONT = '700 34px ui-monospace, Menlo, monospace';
 const INK = '#e8e6df';
@@ -171,11 +172,20 @@ function drawMinimap(
         ctx.arc(zone.x, zone.y, 70, 0, Math.PI * 2);
         ctx.fill();
     }
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(s.player.x, s.player.y, 44, 0, Math.PI * 2);
-    ctx.fill();
+    const below = inCellars(s.player.x, s.player.y);
+    if (!below) {
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(s.player.x, s.player.y, 44, 0, Math.PI * 2);
+        ctx.fill();
+    }
     ctx.restore();
+    if (below) {
+        ctx.fillStyle = INK;
+        ctx.font = LABEL_FONT;
+        ctx.textAlign = 'right';
+        ctx.fillText('BELOW THE HOTEL', view.width - 14, height + 36);
+    }
 }
 
 export function drawHud(
@@ -183,8 +193,20 @@ export function drawHud(
     s: RaidState,
     view: RaidView,
     scored: boolean,
+    fx: Fx,
 ): void {
-    drawExtractMarkers(ctx, s, view);
+    // Below ground there is no telling which way an extract lies.
+    if (!inCellars(s.player.x, s.player.y)) {
+        drawExtractMarkers(ctx, s, view);
+    }
+    if (fx.bannerLeft > 0) {
+        ctx.globalAlpha = Math.min(1, fx.bannerLeft);
+        ctx.fillStyle = '#ffd54a';
+        ctx.font = '700 18px ui-monospace, Menlo, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(fx.banner, view.width / 2, 92);
+        ctx.globalAlpha = 1;
+    }
     drawStatus(ctx, s, view);
     drawMinimap(ctx, s, view);
     ctx.font = LABEL_FONT;
@@ -201,6 +223,7 @@ const CONTROLS = [
     'WASD move · Shift sprint · Mouse aim · Click fire',
     'R reload · G grenade · Q medkit · hold E search',
     'Bushes hide you while you stand still. Sprinting and gunfire carry.',
+    'Stairs in the hotel lead down to the cellars: the best loot, the least light.',
     'Reach an EXFIL and hold it to keep what you carry.',
 ];
 

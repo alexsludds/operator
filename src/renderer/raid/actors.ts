@@ -36,6 +36,10 @@ interface EnemyStats {
     range: number;
     /** How fast awareness builds while it watches the player. */
     wits: number;
+    /** Seconds its sights rest on the player before an aimed shot; 0 fires
+     *  in bursts. */
+    aim: number;
+    grenadier: boolean;
 }
 
 export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
@@ -49,6 +53,8 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
         spread: 0.24,
         walk: 55,
         wits: 0.9,
+        aim: 0,
+        grenadier: false,
     },
     guard: {
         burst: 4,
@@ -60,6 +66,8 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
         spread: 0.13,
         walk: 65,
         wits: 1.4,
+        aim: 0,
+        grenadier: false,
     },
     marksman: {
         burst: 1,
@@ -71,11 +79,49 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
         spread: 0.025,
         walk: 0,
         wits: 1.1,
+        aim: 1.3,
+        grenadier: false,
+    },
+    captain: {
+        aim: 0,
+        burst: 5,
+        damage: 13,
+        grenadier: false,
+        hp: 190,
+        range: 300,
+        run: 135,
+        sight: 560,
+        spread: 0.09,
+        walk: 75,
+        wits: 1.8,
+    },
+    spotter: {
+        aim: 0.9,
+        burst: 1,
+        damage: 30,
+        grenadier: false,
+        hp: 110,
+        range: 470,
+        run: 110,
+        sight: 760,
+        spread: 0.03,
+        walk: 75,
+        wits: 1.6,
+    },
+    sapper: {
+        aim: 0,
+        burst: 3,
+        damage: 10,
+        grenadier: true,
+        hp: 150,
+        range: 250,
+        run: 125,
+        sight: 520,
+        spread: 0.16,
+        walk: 75,
+        wits: 1.5,
     },
 };
-
-/** How long a marksman's sights rest on the player before the shot. */
-export const MARKSMAN_AIM = 1.3;
 
 const LOOT_TEXT: Record<Crate['kind'], (c: Crate) => string> = {
     ammo: () => '+60 rounds',
@@ -310,13 +356,32 @@ function fight(s: RaidState, e: Enemy, distance: number, dt: number): void {
         }
     }
 
+    e.throwLeft -= dt;
+    if (
+        stats.grenadier &&
+        e.throwLeft <= 0 &&
+        distance > 140 &&
+        distance < 440
+    ) {
+        e.throwLeft = 5 + rand(s) * 3;
+        s.grenades.push({
+            flight: GRENADE_FLIGHT,
+            fuse: GRENADE_FUSE,
+            vx: (p.x - e.x) / GRENADE_FLIGHT,
+            vy: (p.y - e.y) / GRENADE_FLIGHT,
+            x: e.x,
+            y: e.y,
+        });
+        s.events.push({ type: 'throw', x: e.x, y: e.y });
+    }
+
     e.cooldown -= dt;
-    if (e.kind === 'marksman') {
+    if (stats.aim > 0) {
         if (e.aimLeft > 0) {
             e.aimLeft -= dt;
             if (e.aimLeft <= 0) {
                 e.aimLeft = 0;
-                e.cooldown = 2.2;
+                e.cooldown = 0.9 + stats.aim;
                 fireBullet(
                     s,
                     e,
@@ -326,7 +391,7 @@ function fight(s: RaidState, e: Enemy, distance: number, dt: number): void {
                 );
             }
         } else if (e.cooldown <= 0) {
-            e.aimLeft = MARKSMAN_AIM;
+            e.aimLeft = stats.aim;
         }
     } else if (e.cooldown <= 0) {
         fireBullet(

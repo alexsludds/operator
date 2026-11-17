@@ -1,7 +1,7 @@
 /** Bullets, grenades and the damage they do. */
 
 import { hasLineOfSight, inSolid, isBlocked } from './geometry';
-import { rand } from './types';
+import { isSquad, rand } from './types';
 import type { Enemy, LootKind, RaidState } from './types';
 import type { Point } from './world';
 
@@ -155,18 +155,19 @@ export function reapEnemies(s: RaidState): void {
         s.kills += 1;
         s.events.push({ type: 'kill', x: e.x, y: e.y });
         s.corpses.push({ facing: e.facing, kind: e.kind, x: e.x, y: e.y });
-        const kind =
-            e.kind === 'guard' && rand(s) < 0.3
-                ? 'armor'
-                : DROPS[Math.floor(rand(s) * DROPS.length)];
+        const squad = isSquad(e.kind);
+        const kind = squad
+            ? 'valuables'
+            : e.kind === 'guard' && rand(s) < 0.3
+              ? 'armor'
+              : DROPS[Math.floor(rand(s) * DROPS.length)];
+        const worth = squad ? 22 : e.kind === 'drifter' ? 2 : 6;
         s.crates.push({
             kind,
             progress: 0,
-            search: 0.35,
+            search: squad ? 0.8 : 0.35,
             taken: false,
-            value:
-                (e.kind === 'drifter' ? 2 : 6) * 1000 +
-                Math.floor(rand(s) * 8) * 1000,
+            value: (worth + Math.floor(rand(s) * (squad ? 30 : 8))) * 1000,
             x: e.x,
             y: e.y,
         });

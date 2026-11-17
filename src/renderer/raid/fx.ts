@@ -24,13 +24,23 @@ export interface Floater {
 export interface Fx {
     particles: Particle[];
     floaters: Floater[];
+    /** A line across the top of the screen, and the seconds it has left. */
+    banner: string;
+    bannerLeft: number;
     /** Screen shake and full-screen flash, each decaying from 1 to 0. */
     shake: number;
     flash: number;
 }
 
 export function createFx(): Fx {
-    return { flash: 0, floaters: [], particles: [], shake: 0 };
+    return {
+        banner: '',
+        bannerLeft: 0,
+        flash: 0,
+        floaters: [],
+        particles: [],
+        shake: 0,
+    };
 }
 
 function burst(
@@ -110,6 +120,11 @@ export function feedFx(fx: Fx, events: RaidEvent[]): void {
                     y: event.y - 20,
                 });
                 break;
+            case 'squad':
+            case 'stairs':
+                fx.banner = event.text ?? '';
+                fx.bannerLeft = event.type === 'squad' ? 5 : 2;
+                break;
             default:
                 break;
         }
@@ -130,6 +145,7 @@ export function stepFx(fx: Fx, dt: number): void {
         f.life -= dt;
     }
     fx.floaters = fx.floaters.filter((f) => f.life > 0);
+    fx.bannerLeft = Math.max(0, fx.bannerLeft - dt);
     fx.shake = Math.max(0, fx.shake - dt * 2.4);
     fx.flash = Math.max(0, fx.flash - dt * 2);
 }

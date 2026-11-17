@@ -207,7 +207,7 @@ export function RaidLayer({
             if (briefing) {
                 drawBriefing(ctx, view, stash, scored);
             } else {
-                drawHud(ctx, raid, view, scored);
+                drawHud(ctx, raid, view, scored, fx);
                 drawEnding(ctx, raid, view, stash);
             }
 

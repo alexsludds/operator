@@ -1,12 +1,13 @@
 /** Draws the world of a raid: the map, everyone in sight, fog and weather. */
 
-import { INTERACT_RANGE, MARKSMAN_AIM } from './actors';
+import { ENEMY_STATS, INTERACT_RANGE } from './actors';
 import { BLAST_RADIUS } from './combat';
 import type { Fx } from './fx';
 import { hasLineOfSight, visibilityFan } from './geometry';
 import { extractZoneAt, stormOf } from './sim';
+import { isSquad } from './types';
 import type { Enemy, EnemyKind, RaidState } from './types';
-import { EXTRACTS, TREES, WORLD, shorelineY } from './world';
+import { EXTRACTS, STAIRS, TREES, WORLD, inCellars, shorelineY } from './world';
 
 export interface RaidView {
     /** Canvas size in CSS pixels. */
@@ -19,8 +20,13 @@ export interface RaidLayers {
     fog: HTMLCanvasElement;
 }
 
-/** How far the player sees, in world units. */
-export const VIEW_RANGE = 580;
+const SURFACE_VIEW = 580;
+const CELLAR_VIEW = 300;
+
+/** How far the player sees, in world units: less by lamplight below ground. */
+export function viewRange(s: RaidState): number {
+    return inCellars(s.player.x, s.player.y) ? CELLAR_VIEW : SURFACE_VIEW;
+}
 
 export const LABEL_FONT = '600 12px ui-monospace, Menlo, monospace';
 
@@ -28,6 +34,9 @@ const ENEMY_COLOR: Record<EnemyKind, string> = {
     drifter: '#b48c5c',
     guard: '#5f7594',
     marksman: '#8a62a0',
+    captain: '#c2473a',
+    spotter: '#3f958e',
+    sapper: '#cf8a2e',
 };
 
 /** CSS pixels per world unit, set by the smaller canvas side. */
@@ -74,6 +83,28 @@ function drawGround(
         ctx.textAlign = 'center';
         ctx.fillText(`EXFIL · ${z.name}`, z.x, z.y - z.r - 8);
     });
+}
+
+function drawStairs(ctx: CanvasRenderingContext2D, s: RaidState): void {
+    const p = s.player;
+    for (const stairs of STAIRS) {
+        ctx.fillStyle = '#1b1d20';
+        ctx.fillRect(stairs.x - 20, stairs.y - 20, 40, 40);
+        ctx.strokeStyle = '#d9c88a';
+        ctx.lineWidth = 2;
+        for (let step = -14; step <= 14; step += 7) {
+            ctx.beginPath();
+            ctx.moveTo(stairs.x - 16, stairs.y + step);
+            ctx.lineTo(stairs.x + 16, stairs.y + step);
+            ctx.stroke();
+        }
+        if (Math.hypot(stairs.x - p.x, stairs.y - p.y) < 60) {
+            ctx.fillStyle = '#fff3c7';
+            ctx.font = LABEL_FONT;
+            ctx.textAlign = 'center';
+            ctx.fillText(`hold E · ${stairs.label}`, stairs.x, stairs.y - 28);
+        }
+    }
 }
 
 function drawItems(ctx: CanvasRenderingContext2D, s: RaidState): void {
@@ -176,14 +207,14 @@ function drawEnemy(
 ): void {
     const p = s.player;
     const inSight =
-        Math.hypot(e.x - p.x, e.y - p.y) < VIEW_RANGE &&
+        Math.hypot(e.x - p.x, e.y - p.y) < viewRange(s) &&
         hasLineOfSight(p.x, p.y, e.x, e.y);
     // A marksman's sights show wherever they come from.
     if (e.aimLeft > 0) {
         ctx.beginPath();
         ctx.moveTo(e.x, e.y);
         ctx.lineTo(p.x, p.y);
-        ctx.strokeStyle = `rgba(255, 60, 50, ${0.25 + 0.6 * (1 - e.aimLeft / MARKSMAN_AIM)})`;
+        ctx.strokeStyle = `rgba(255, 60, 50, ${0.25 + 0.6 * (1 - e.aimLeft / ENEMY_STATS[e.kind].aim)})`;
         ctx.lineWidth = 1.5;
         ctx.stroke();
     }
@@ -195,9 +226,15 @@ function drawEnemy(
         e.x,
         e.y,
         e.facing,
-        12,
+        isSquad(e.kind) ? 14 : 12,
         ENEMY_COLOR[e.kind],
-        e.mode === 'combat' ? '#e2503f' : e.kind === 'guard' ? '#c8d4e6' : null,
+        e.mode === 'combat'
+            ? '#e2503f'
+            : isSquad(e.kind)
+              ? '#ffd54a'
+              : e.kind === 'guard'
+                ? '#c8d4e6'
+                : null,
     );
     if (e.mode !== 'combat' && e.awareness > 0.05) {
         ctx.beginPath();
@@ -295,24 +332,19 @@ function drawFog(
     const p = s.player;
     fogCtx.setTransform(1, 0, 0, 1, 0, 0);
     fogCtx.globalCompositeOperation = 'source-over';
-    fogCtx.fillStyle = `rgba(6, 10, 14, ${0.62 + 0.2 * stormOf(s)})`;
+    const below = inCellars(p.x, p.y);
+    const reach = viewRange(s);
+    fogCtx.fillStyle = `rgba(6, 10, 14, ${below ? 0.96 : 0.62 + 0.2 * stormOf(s)})`;
     fogCtx.fillRect(0, 0, fog.width, fog.height);
 
     fogCtx.setTransform(camera);
     fogCtx.globalCompositeOperation = 'destination-out';
-    const light = fogCtx.createRadialGradient(
-        p.x,
-        p.y,
-        40,
-        p.x,
-        p.y,
-        VIEW_RANGE,
-    );
+    const light = fogCtx.createRadialGradient(p.x, p.y, 40, p.x, p.y, reach);
     light.addColorStop(0, 'rgba(0, 0, 0, 1)');
     light.addColorStop(0.6, 'rgba(0, 0, 0, 0.9)');
     light.addColorStop(1, 'rgba(0, 0, 0, 0)');
     fogCtx.fillStyle = light;
-    const fan = visibilityFan(p.x, p.y, VIEW_RANGE);
+    const fan = visibilityFan(p.x, p.y, reach);
     fogCtx.beginPath();
     for (let i = 0; i < fan.length; i += 2) {
         fogCtx.lineTo(fan[i], fan[i + 1]);
@@ -333,7 +365,10 @@ function drawWeather(
     ctx.strokeStyle = 'rgba(190, 210, 225, 0.28)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    const drops = Math.floor(30 + storm * 190);
+    // No rain falls below ground.
+    const drops = inCellars(s.player.x, s.player.y)
+        ? 0
+        : Math.floor(30 + storm * 190);
     for (let i = 0; i < drops; i++) {
         const x = ((i * 7919) % 997) / 997;
         const y = ((i * 6007) % 991) / 991;
@@ -403,6 +438,7 @@ export function drawScene(
     // device-pixel scale the main canvas carries.
     const camera = base.inverse().multiply(ctx.getTransform());
     drawGround(ctx, s, layers.terrain);
+    drawStairs(ctx, s);
     drawItems(ctx, s);
     drawActors(ctx, s, fx);
     ctx.restore();

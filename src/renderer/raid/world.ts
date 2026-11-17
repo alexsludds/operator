@@ -46,7 +46,11 @@ export interface EnemyPost extends Point {
     kind: 'drifter' | 'guard' | 'marksman';
 }
 
+/** The surface of the map. */
 export const WORLD = { height: 2200, width: 3200 };
+
+/** Everything a body can stand in: the surface, then the cellars east of it. */
+export const BOUNDS = { height: 2200, width: 4160 };
 export const WALL = 8;
 const DOOR = 46;
 
@@ -327,7 +331,161 @@ function roomWalls(room: RoomSpec): Rect[] {
     return walls;
 }
 
-export const WALLS: Rect[] = ROOM_SPECS.flatMap(roomWalls);
+const MAZE_CELLS = 9;
+const MAZE_PITCH = 80;
+
+/**
+ * The cellars under the hotel: a maze, laid out east of the surface and
+ * walled off from it. Stairs are the only way between the two.
+ */
+export const CELLARS: Rect = {
+    h: MAZE_CELLS * MAZE_PITCH + WALL,
+    w: MAZE_CELLS * MAZE_PITCH + WALL,
+    x: 3360,
+    y: 200,
+};
+
+/** The centre of a maze cell. */
+function mazeCell(col: number, row: number): Point {
+    return {
+        x: CELLARS.x + col * MAZE_PITCH + (MAZE_PITCH + WALL) / 2,
+        y: CELLARS.y + row * MAZE_PITCH + (MAZE_PITCH + WALL) / 2,
+    };
+}
+
+/**
+ * Carve the maze from a fixed seed. `east[i]` and `south[i]` say whether cell
+ * `i` opens onto the cell to its east or south.
+ */
+function carveMaze(): { east: boolean[]; south: boolean[] } {
+    const count = MAZE_CELLS * MAZE_CELLS;
+    const east: boolean[] = Array.from({ length: count }, () => false);
+    const south: boolean[] = Array.from({ length: count }, () => false);
+    const seen: boolean[] = Array.from({ length: count }, () => false);
+    let state = 2024;
+    const next = () => {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state / 4294967296;
+    };
+    const open = (from: number, to: number) => {
+        const low = Math.min(from, to);
+        if (Math.abs(from - to) === 1) {
+            east[low] = true;
+        } else {
+            south[low] = true;
+        }
+    };
+    const neighbours = (cell: number) => {
+        const col = cell % MAZE_CELLS;
+        return [
+            col > 0 ? cell - 1 : -1,
+            col < MAZE_CELLS - 1 ? cell + 1 : -1,
+            cell - MAZE_CELLS,
+            cell + MAZE_CELLS,
+        ].filter((n) => n >= 0 && n < count);
+    };
+    const trail = [0];
+    seen[0] = true;
+    while (trail.length > 0) {
+        const cell = trail[trail.length - 1];
+        const fresh = neighbours(cell).filter((n) => !seen[n]);
+        if (fresh.length === 0) {
+            trail.pop();
+            continue;
+        }
+        const to = fresh[Math.floor(next() * fresh.length)];
+        open(cell, to);
+        seen[to] = true;
+        trail.push(to);
+    }
+    // A few extra openings make loops, so no chase ends in a certain corner.
+    for (let i = 0; i < 9; i++) {
+        const cell = Math.floor(next() * count);
+        const around = neighbours(cell);
+        open(cell, around[Math.floor(next() * around.length)]);
+    }
+    return { east, south };
+}
+
+const MAZE = carveMaze();
+
+function mazeWalls(): Rect[] {
+    const walls: Rect[] = [
+        { h: WALL, w: CELLARS.w, x: CELLARS.x, y: CELLARS.y },
+        { h: CELLARS.h, w: WALL, x: CELLARS.x, y: CELLARS.y },
+    ];
+    for (let row = 0; row < MAZE_CELLS; row++) {
+        for (let col = 0; col < MAZE_CELLS; col++) {
+            const cell = row * MAZE_CELLS + col;
+            const x = CELLARS.x + col * MAZE_PITCH;
+            const y = CELLARS.y + row * MAZE_PITCH;
+            if (col === MAZE_CELLS - 1 || !MAZE.east[cell]) {
+                walls.push({
+                    h: MAZE_PITCH + WALL,
+                    w: WALL,
+                    x: x + MAZE_PITCH,
+                    y,
+                });
+            }
+            if (row === MAZE_CELLS - 1 || !MAZE.south[cell]) {
+                walls.push({
+                    h: WALL,
+                    w: MAZE_PITCH + WALL,
+                    x,
+                    y: y + MAZE_PITCH,
+                });
+            }
+        }
+    }
+    return walls;
+}
+
+/** How many ways lead out of a maze cell. */
+function mazeExits(cell: number): number {
+    const col = cell % MAZE_CELLS;
+    return [
+        MAZE.east[cell],
+        MAZE.south[cell],
+        col > 0 && MAZE.east[cell - 1],
+        cell >= MAZE_CELLS && MAZE.south[cell - MAZE_CELLS],
+    ].filter(Boolean).length;
+}
+
+const STAIR_CELLS = [0, MAZE_CELLS * MAZE_CELLS - 1];
+
+/** The best loot on the map waits at the maze's dead ends. */
+const CELLAR_CRATES: (Point & { tier: number })[] = Array.from(
+    { length: MAZE_CELLS * MAZE_CELLS },
+    (_, cell) => cell,
+)
+    .filter((cell) => mazeExits(cell) === 1 && !STAIR_CELLS.includes(cell))
+    .slice(0, 8)
+    .map((cell) => ({
+        tier: 3,
+        ...mazeCell(cell % MAZE_CELLS, Math.floor(cell / MAZE_CELLS)),
+    }));
+
+export interface Stairs extends Point {
+    /** Where the stairs come out. */
+    to: Point;
+    label: string;
+}
+
+export const STAIRS: Stairs[] = [
+    { label: 'Cellars', to: mazeCell(0, 0), x: 1540, y: 300 },
+    { label: 'Hotel hall', to: { x: 1540, y: 300 }, ...mazeCell(0, 0) },
+    { label: 'Cellars', to: mazeCell(8, 8), x: 2200, y: 365 },
+    { label: 'East wing', to: { x: 2200, y: 365 }, ...mazeCell(8, 8) },
+];
+
+/** The cliff that closes the surface's east edge. */
+const CLIFF: Rect = { h: BOUNDS.height, w: 60, x: WORLD.width, y: 0 };
+
+export const WALLS: Rect[] = [
+    ...ROOM_SPECS.flatMap(roomWalls),
+    ...mazeWalls(),
+    CLIFF,
+];
 
 export const ROCKS: Rect[] = [
     { h: 44, w: 70, x: 520, y: 1700 },
@@ -359,7 +517,7 @@ export function inRect(x: number, y: number, r: Rect, pad = 0): boolean {
 }
 
 export function isWater(x: number, y: number): boolean {
-    return y > shorelineY(x) && !inRect(x, y, PIER);
+    return x < WORLD.width && y > shorelineY(x) && !inRect(x, y, PIER);
 }
 
 function nearRoad(x: number, y: number, reach: number): boolean {
@@ -437,13 +595,15 @@ export const SOLIDS: Rect[] = [
 ];
 
 /** One crate stands in every room, off-centre so it never blocks a door. */
-export const CRATE_SPOTS: (Point & { tier: number })[] = ROOMS.filter(
+const ROOM_CRATES: (Point & { tier: number })[] = ROOMS.filter(
     (room) => room.h > 80,
 ).map((room, i) => ({
     tier: room.tier,
     x: room.x + (i % 2 ? 34 : room.w - 34),
     y: room.y + (i % 3 ? 34 : room.h - 34),
 }));
+
+export const CRATE_SPOTS = [...ROOM_CRATES, ...CELLAR_CRATES];
 
 export const ENEMY_POSTS: EnemyPost[] = [
     { kind: 'guard', x: 1460, y: 380 },
@@ -462,10 +622,28 @@ export const ENEMY_POSTS: EnemyPost[] = [
     { kind: 'drifter', x: 2560, y: 1640 },
     { kind: 'drifter', x: 2840, y: 1150 },
     { kind: 'marksman', x: 2560, y: 520 },
+    { kind: 'guard', ...mazeCell(4, 4) },
+    { kind: 'guard', ...mazeCell(7, 2) },
+    { kind: 'guard', ...mazeCell(2, 6) },
 ];
 
-export function roomAt(x: number, y: number): Room | undefined {
-    return ROOMS.find((room) => inRect(x, y, room));
+/** Where the roaming squad comes ashore, and the sites it moves between. */
+export const SQUAD_SPAWN: Point = { x: 2960, y: 330 };
+export const SQUAD_ROUTE: Point[] = [
+    { x: 1540, y: 640 },
+    { x: 1480, y: 1040 },
+    { x: 2560, y: 1380 },
+    { x: 2420, y: 640 },
+    { x: 700, y: 1100 },
+];
+
+export function inCellars(x: number, y: number): boolean {
+    return inRect(x, y, CELLARS);
+}
+
+/** Under a roof: in a room on the surface, or anywhere below it. */
+export function isIndoors(x: number, y: number): boolean {
+    return inCellars(x, y) || ROOMS.some((room) => inRect(x, y, room));
 }
 
 export function inBush(x: number, y: number): boolean {

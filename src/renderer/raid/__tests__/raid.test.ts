@@ -15,11 +15,13 @@ import {
 import {
     EXTRACT_SECONDS,
     RAID_SECONDS,
+    SQUAD_LANDS,
     createRaid,
     raidMusic,
     stepRaid,
 } from '../sim';
 import { settleRaid } from '../stash';
+import { isSquad } from '../types';
 import type { RaidInput, RaidState } from '../types';
 import {
     BUSHES,
@@ -28,6 +30,10 @@ import {
     EXTRACTS,
     PLAYER_SPAWNS,
     ROOMS,
+    SQUAD_ROUTE,
+    SQUAD_SPAWN,
+    STAIRS,
+    inCellars,
 } from '../world';
 
 const IDLE: RaidInput = {
@@ -75,6 +81,9 @@ describe('the map', () => {
             ...CRATE_SPOTS,
             ...ENEMY_POSTS,
             ...EXTRACTS,
+            ...STAIRS,
+            ...SQUAD_ROUTE,
+            SQUAD_SPAWN,
         ];
         for (const spot of spots) {
             expect(
@@ -340,6 +349,83 @@ describe('a raid', () => {
         s.time = RAID_SECONDS - 0.5;
         run(s, IDLE, 1);
         expect(s.phase).toBe('mia');
+    });
+
+    test('stairs lead down to the cellars and back, one press each way', () => {
+        const s = emptyRaid();
+        const [down] = STAIRS;
+        s.player.x = down.x;
+        s.player.y = down.y;
+        run(s, { ...IDLE, interact: true }, 0.4);
+        expect(inCellars(s.player.x, s.player.y)).toBe(false);
+        // Still holding E after arriving does not climb straight back up.
+        run(s, { ...IDLE, interact: true }, 3);
+        expect(inCellars(s.player.x, s.player.y)).toBe(true);
+        expect(raidMusic(s).indoors).toBe(true);
+        run(s, IDLE, 0.1);
+        run(s, { ...IDLE, interact: true }, 1);
+        expect(inCellars(s.player.x, s.player.y)).toBe(false);
+    });
+
+    test('every cellar crate and both stairs can be reached below ground', () => {
+        const from = STAIRS[0].to;
+        const cellarSpots = [
+            STAIRS[2].to,
+            ...CRATE_SPOTS.filter((c) => inCellars(c.x, c.y)),
+        ];
+        expect(cellarSpots.length).toBeGreaterThan(4);
+        for (const spot of cellarSpots) {
+            expect(
+                nextWaypoint(from, spot),
+                JSON.stringify(spot),
+            ).not.toBeNull();
+        }
+        // Nothing walks between the cellars and the surface.
+        expect(nextWaypoint(from, PLAYER_SPAWNS[0])).toBeNull();
+    });
+
+    test('the squad lands as three, then moves on from site to site', () => {
+        const s = emptyRaid();
+        s.player.x = 150;
+        s.player.y = 1690;
+        run(s, IDLE, SQUAD_LANDS - 1);
+        expect(s.enemies.length).toBe(0);
+        run(s, IDLE, 2);
+        expect(s.enemies.map((e) => e.kind)).toEqual([
+            'captain',
+            'spotter',
+            'sapper',
+        ]);
+        expect(s.enemies.every((e) => isSquad(e.kind))).toBe(true);
+        const first = s.enemies[0].homeX;
+        run(s, IDLE, 50);
+        expect(s.enemies[0].homeX).not.toBe(first);
+        // By then they have walked well away from where they landed.
+        expect(
+            Math.hypot(
+                s.enemies[0].x - SQUAD_SPAWN.x,
+                s.enemies[0].y - SQUAD_SPAWN.y,
+            ),
+        ).toBeGreaterThan(400);
+    });
+
+    test('a sapper in a fight throws grenades', () => {
+        const s = emptyRaid();
+        s.time = SQUAD_LANDS;
+        stepRaid(s, IDLE, STEP);
+        const sapper = s.enemies.find((e) => e.kind === 'sapper')!;
+        s.enemies = [sapper];
+        s.player.x = sapper.x - 260;
+        s.player.y = sapper.y + 80;
+        s.player.hp = 100000;
+        sapper.mode = 'combat';
+        sapper.awareness = 1;
+        let thrown = false;
+        for (let t = 0; t < 6 && !thrown; t += STEP) {
+            stepRaid(s, IDLE, STEP);
+            thrown = s.grenades.length > 0;
+        }
+        expect(thrown).toBe(true);
     });
 
     test('being indoors is reported to the music', () => {

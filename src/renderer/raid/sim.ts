@@ -5,18 +5,35 @@
 
 import { ENEMY_STATS, MAGAZINE, stepEnemy, stepPlayer } from './actors';
 import { reapEnemies, stepBullets, stepGrenades } from './combat';
-import { rand } from './types';
-import type { Crate, LootKind, RaidInput, RaidMusic, RaidState } from './types';
+import { SQUAD_KINDS, rand } from './types';
+import type {
+    Crate,
+    Enemy,
+    EnemyKind,
+    LootKind,
+    RaidInput,
+    RaidMusic,
+    RaidState,
+} from './types';
 import {
     CRATE_SPOTS,
     ENEMY_POSTS,
     EXTRACTS,
     PLAYER_SPAWNS,
-    roomAt,
+    SQUAD_ROUTE,
+    SQUAD_SPAWN,
+    STAIRS,
+    isIndoors,
 } from './world';
+import type { Point } from './world';
 
 export const RAID_SECONDS = 600;
 export const EXTRACT_SECONDS = 6;
+/** When the roaming squad lands, and how long it holds each site. */
+export const SQUAD_LANDS = 90;
+const SQUAD_HOLD = 45;
+const STAIR_SECONDS = 0.6;
+const STAIR_REACH = 30;
 /** Seconds after the last shot that the raid still counts as a firefight. */
 const CONTACT_SECONDS = 3;
 
@@ -52,6 +69,32 @@ function fillCrate(s: RaidState, tier: number): Pick<Crate, 'kind' | 'value'> {
     }
     const value = Math.round((3 + rand(s) * 11) * tier ** 1.5) * 1000;
     return { kind, value };
+}
+
+function spawnEnemy(s: RaidState, kind: EnemyKind, at: Point): Enemy {
+    return {
+        aimLeft: 0,
+        awareness: 0,
+        blind: 0,
+        burst: 0,
+        cooldown: rand(s) * 3,
+        facing: rand(s) * Math.PI * 2,
+        homeX: at.x,
+        homeY: at.y,
+        hp: ENEMY_STATS[kind].hp,
+        kind,
+        mode: 'patrol',
+        routeLeft: 0,
+        strafe: 1,
+        strafeLeft: 0,
+        targetX: at.x,
+        targetY: at.y,
+        throwLeft: 2,
+        wayX: at.x,
+        wayY: at.y,
+        x: at.x,
+        y: at.y,
+    };
 }
 
 export function createRaid(seed: number): RaidState {
@@ -90,6 +133,10 @@ export function createRaid(seed: number): RaidState {
             y: 0,
         },
         rng: seed >>> 0,
+        squadLanded: false,
+        squadMoveAt: SQUAD_LANDS,
+        squadStop: -1,
+        stairProgress: 0,
         time: 0,
     };
     const spawn = PLAYER_SPAWNS[Math.floor(rand(s) * PLAYER_SPAWNS.length)];
@@ -103,28 +150,7 @@ export function createRaid(seed: number): RaidState {
         x: spot.x,
         y: spot.y,
     }));
-    s.enemies = ENEMY_POSTS.map((post) => ({
-        aimLeft: 0,
-        awareness: 0,
-        blind: 0,
-        burst: 0,
-        cooldown: rand(s) * 3,
-        facing: rand(s) * Math.PI * 2,
-        homeX: post.x,
-        homeY: post.y,
-        hp: ENEMY_STATS[post.kind].hp,
-        kind: post.kind,
-        mode: 'patrol',
-        routeLeft: 0,
-        strafe: 1,
-        strafeLeft: 0,
-        targetX: post.x,
-        targetY: post.y,
-        wayX: post.x,
-        wayY: post.y,
-        x: post.x,
-        y: post.y,
-    }));
+    s.enemies = ENEMY_POSTS.map((post) => spawnEnemy(s, post.kind, post));
     return s;
 }
 
@@ -137,6 +163,73 @@ export function stormOf(s: RaidState): number {
     return Math.min(1, s.time / RAID_SECONDS);
 }
 
+/** Three abreast, so the squad never stacks on one spot. */
+const squadOffset = (index: number) => (index - 1) * 44;
+
+/** Land the squad when its time comes, then walk it from site to site. */
+function stepSquad(s: RaidState): void {
+    if (s.time < s.squadMoveAt) {
+        return;
+    }
+    s.squadMoveAt = s.time + SQUAD_HOLD;
+    if (!s.squadLanded) {
+        s.squadLanded = true;
+        SQUAD_KINDS.forEach((kind, index) => {
+            s.enemies.push(
+                spawnEnemy(s, kind, {
+                    x: SQUAD_SPAWN.x + squadOffset(index),
+                    y: SQUAD_SPAWN.y,
+                }),
+            );
+        });
+        s.events.push({
+            text: 'THE WRECKERS HAVE COME ASHORE',
+            type: 'squad',
+            x: SQUAD_SPAWN.x,
+            y: SQUAD_SPAWN.y,
+        });
+    }
+    s.squadStop = (s.squadStop + 1) % SQUAD_ROUTE.length;
+    const site = SQUAD_ROUTE[s.squadStop];
+    for (const e of s.enemies) {
+        const index = SQUAD_KINDS.indexOf(e.kind);
+        if (index < 0) {
+            continue;
+        }
+        e.homeX = site.x + squadOffset(index);
+        e.homeY = site.y;
+        if (e.mode === 'patrol') {
+            e.targetX = e.homeX;
+            e.targetY = e.homeY;
+            e.routeLeft = 0;
+        }
+    }
+}
+
+/** Holding E on a staircase takes the player to its other end. */
+function stepStairs(s: RaidState, held: boolean, dt: number): void {
+    const p = s.player;
+    const stairs = STAIRS.find(
+        (st) => Math.hypot(st.x - p.x, st.y - p.y) < STAIR_REACH,
+    );
+    if (!held || !stairs) {
+        s.stairProgress = 0;
+    } else if (s.stairProgress >= 0) {
+        s.stairProgress += dt;
+        if (s.stairProgress >= STAIR_SECONDS) {
+            p.x = stairs.to.x;
+            p.y = stairs.to.y;
+            s.stairProgress = -1;
+            s.events.push({
+                text: stairs.label.toUpperCase(),
+                type: 'stairs',
+                x: p.x,
+                y: p.y,
+            });
+        }
+    }
+}
+
 /** Advance the raid by `dt` seconds. A finished raid no longer changes. */
 export function stepRaid(s: RaidState, input: RaidInput, dt: number): void {
     s.events = [];
@@ -145,6 +238,8 @@ export function stepRaid(s: RaidState, input: RaidInput, dt: number): void {
     }
     s.time += dt;
     stepPlayer(s, input, dt);
+    stepStairs(s, input.interact, dt);
+    stepSquad(s);
     for (const e of s.enemies) {
         stepEnemy(s, e, dt);
     }
@@ -172,7 +267,7 @@ export function stepRaid(s: RaidState, input: RaidInput, dt: number): void {
 }
 
 export function raidMusic(s: RaidState): RaidMusic {
-    const indoors = roomAt(s.player.x, s.player.y) !== undefined;
+    const indoors = isIndoors(s.player.x, s.player.y);
     if (s.phase === 'extracted') {
         return {
             contact: false,

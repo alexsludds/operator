@@ -1,6 +1,6 @@
 /** Sight, collision and pathfinding over the map's solids. */
 
-import { SIGHT_SOLIDS, SOLIDS, WORLD, isWater } from './world';
+import { BOUNDS, SIGHT_SOLIDS, SOLIDS, isWater } from './world';
 import type { Point, Rect } from './world';
 
 /**
@@ -62,8 +62,8 @@ export function isBlocked(x: number, y: number, radius: number): boolean {
     return (
         x < radius ||
         y < radius ||
-        x > WORLD.width - radius ||
-        y > WORLD.height - radius ||
+        x > BOUNDS.width - radius ||
+        y > BOUNDS.height - radius ||
         isWater(x, y) ||
         inSolid(x, y, radius)
     );
@@ -138,8 +138,8 @@ export function visibilityFan(
 }
 
 const CELL = 20;
-const COLS = Math.ceil(WORLD.width / CELL);
-const ROWS = Math.ceil(WORLD.height / CELL);
+const COLS = Math.ceil(BOUNDS.width / CELL);
+const ROWS = Math.ceil(BOUNDS.height / CELL);
 /** Clearance a walker needs around a cell's centre. */
 const NAV_RADIUS = 12;
 

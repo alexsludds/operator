@@ -43,6 +43,7 @@ const EVENT_BUTTONS: Partial<Record<RaidEventType, string>> = {
     reload: 'Reload',
     shot: 'Shot',
     spotted: 'Spotted',
+    squad: 'Spotted',
     step: 'Step',
     thunder: 'Thunder',
 };

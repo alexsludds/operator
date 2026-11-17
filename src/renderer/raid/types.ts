@@ -22,7 +22,18 @@ export interface RaidInput {
     grenade: boolean;
 }
 
-export type EnemyKind = 'drifter' | 'guard' | 'marksman';
+export type EnemyKind =
+    | 'drifter'
+    | 'guard'
+    | 'marksman'
+    | 'captain'
+    | 'spotter'
+    | 'sapper';
+/** The roaming squad, in the order it walks abreast. */
+export const SQUAD_KINDS: EnemyKind[] = ['captain', 'spotter', 'sapper'];
+
+export const isSquad = (kind: EnemyKind) => SQUAD_KINDS.includes(kind);
+
 export type EnemyMode = 'patrol' | 'suspicious' | 'combat';
 
 export interface Enemy extends Point {
@@ -43,8 +54,10 @@ export interface Enemy extends Point {
     routeLeft: number;
     cooldown: number;
     burst: number;
-    /** A marksman's aim, counting down to the shot; 0 when not aiming. */
+    /** An aimed shot's sights, counting down to the shot; 0 when not aiming. */
     aimLeft: number;
+    /** Seconds until a grenadier's next throw. */
+    throwLeft: number;
     strafe: number;
     strafeLeft: number;
     /** Seconds since it last saw the player. */
@@ -93,6 +106,8 @@ export type RaidEventType =
     | 'throw'
     | 'blast'
     | 'thunder'
+    | 'squad'
+    | 'stairs'
     | 'enemyShot'
     | 'enemyHit'
     | 'kill'
@@ -148,6 +163,12 @@ export interface RaidState {
     /** A loud noise enemies in earshot go to look at. */
     noise: (Point & { radius: number; at: number }) | null;
     nextThunder: number;
+    /** Seconds held on a staircase; negative once used, until E is let go. */
+    stairProgress: number;
+    /** The roaming squad: whether it has landed, and its next move. */
+    squadLanded: boolean;
+    squadStop: number;
+    squadMoveAt: number;
 }
 
 /** What the soundtrack follows: 0–5 levels and gates. */

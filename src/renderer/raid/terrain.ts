@@ -8,6 +8,8 @@ import {
     ROOMS,
     WALLS,
     WORLD,
+    BOUNDS,
+    CELLARS,
     shorelineY,
 } from './world';
 import type { SiteKind } from './world';
@@ -52,8 +54,8 @@ function speckle(
 
 export function paintTerrain(): HTMLCanvasElement {
     const canvas = document.createElement('canvas');
-    canvas.width = WORLD.width;
-    canvas.height = WORLD.height;
+    canvas.width = BOUNDS.width;
+    canvas.height = BOUNDS.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
         return canvas;
@@ -155,6 +157,22 @@ export function paintTerrain(): HTMLCanvasElement {
         ctx.beginPath();
         ctx.roundRect(rock.x + 6, rock.y + 5, rock.w * 0.5, rock.h * 0.4, 8);
         ctx.fill();
+    }
+
+    // Below ground: bare rock around the cellars' flagstones.
+    ctx.fillStyle = '#0c0e10';
+    ctx.fillRect(WORLD.width, 0, BOUNDS.width - WORLD.width, BOUNDS.height);
+    ctx.fillStyle = '#3a393c';
+    ctx.fillRect(CELLARS.x, CELLARS.y, CELLARS.w, CELLARS.h);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.lineWidth = 1;
+    for (let offset = 0; offset < CELLARS.w; offset += 40) {
+        ctx.beginPath();
+        ctx.moveTo(CELLARS.x + offset, CELLARS.y);
+        ctx.lineTo(CELLARS.x + offset, CELLARS.y + CELLARS.h);
+        ctx.moveTo(CELLARS.x, CELLARS.y + offset);
+        ctx.lineTo(CELLARS.x + CELLARS.w, CELLARS.y + offset);
+        ctx.stroke();
     }
 
     ctx.fillStyle = '#211e1b';
