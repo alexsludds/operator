@@ -1,0 +1,15 @@
+/* The raid covers the editor panel and takes its pointer and keyboard. */
+.raid-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    outline: none;
+    cursor: crosshair;
+    background: #1f3a4a;
+}
+
+.raid-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}

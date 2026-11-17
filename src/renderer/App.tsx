@@ -26,6 +26,8 @@ import { getErrorMessage } from './utils/errorUtils';
 import { FileExplorer } from './components/FileExplorer';
 import { Sidebar } from './components/Sidebar';
 import { ControlPanel } from './components/ControlPanel';
+import { RaidLayer } from './raid/RaidLayer';
+import raidSoundtrack from '../../examples/shoreline-raid.js?raw';
 import electronAPI from './electronAPI';
 import type { ValidationError } from '@modular/core';
 import type { QueuedTrigger, ScopeStats } from '@modular/core';
@@ -106,7 +108,7 @@ import {
 } from './keybindings/commands';
 import { loadAndInstallKeymap, setWhenEvaluator } from './keybindings/keymap';
 import { evaluateWhen } from './keybindings/contextKey';
-import { getBufferId } from './app/buffers';
+import { DEFAULT_PATCH, getBufferId } from './app/buffers';
 import {
     setTransport,
     updateTransport,
@@ -187,6 +189,7 @@ function App() {
     const [isEngineHealthOpen, setIsEngineHealthOpen] = useState(false);
     const [isPaletteOpen, setIsPaletteOpen] = useState(false);
     const [isModuleProfileOpen, setIsModuleProfileOpen] = useState(false);
+    const [isRaidOpen, setIsRaidOpen] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [validationErrors, setValidationErrors] = useState<
         ValidationError[] | null
@@ -2268,6 +2271,44 @@ function App() {
         activeBufferIdRef.current = activeBufferId;
     }, [activeBufferId]);
 
+    // Open the raid's soundtrack in a buffer of its own and run it. Each
+    // stage waits on the next frame until the editor and the submit path
+    // have caught up with the one before.
+    const loadRaidSoundtrack = useCallback(() => {
+        const whenReady = (ready: () => boolean, then: () => void) => {
+            let frames = 0;
+            const poll = () => {
+                if (ready()) {
+                    then();
+                } else if (frames++ < 120) {
+                    requestAnimationFrame(poll);
+                }
+            };
+            poll();
+        };
+        const submit = () =>
+            whenReady(
+                () => patchCodeRef.current === raidSoundtrack,
+                () => handleSubmitRef.current(),
+            );
+        if (patchCodeRef.current === raidSoundtrack) {
+            submit();
+            return;
+        }
+        const before = activeBufferIdRef.current;
+        createUntitledFile();
+        whenReady(
+            () =>
+                activeBufferIdRef.current !== before &&
+                patchCodeRef.current === DEFAULT_PATCH &&
+                editorRef.current?.getValue() === DEFAULT_PATCH,
+            () => {
+                editorRef.current?.setValue(raidSoundtrack);
+                submit();
+            },
+        );
+    }, [createUntitledFile]);
+
     const closeBufferRef = useRef(closeBuffer);
     useEffect(() => {
         closeBufferRef.current = closeBuffer;
@@ -2397,6 +2438,13 @@ function App() {
             },
         );
         registerCommand(
+            'shoreline.toggleRaid',
+            () => {
+                setIsRaidOpen((open) => !open);
+            },
+            { label: 'Play Raid', category: 'View' },
+        );
+        registerCommand(
             'shoreline.openKeybindings',
             () => {
                 void handleOpenKeybindingsRef.current();
@@ -2440,6 +2488,7 @@ function App() {
             unregisterCommand('shoreline.openWorkspace');
             unregisterCommand('shoreline.showCommandPalette');
             unregisterCommand('shoreline.openKeybindings');
+            unregisterCommand('shoreline.toggleRaid');
         };
     }, []);
 
@@ -2637,6 +2686,12 @@ function App() {
                     }}
                     onUpdatePatch={() => handleSubmitRef.current()}
                 />
+                <button
+                    className="btn btn-secondary"
+                    onClick={() => setIsRaidOpen((open) => !open)}
+                >
+                    {isRaidOpen ? 'Leave Raid' : 'Play Raid'}
+                </button>
             </header>
 
             <ErrorDisplay
@@ -2700,6 +2755,15 @@ function App() {
                                 onUnregisterScopeCanvas={unregisterScopeCanvas}
                             />
                             <PerformancePreview />
+                            {isRaidOpen && (
+                                <RaidLayer
+                                    sliders={sliderDefs}
+                                    buttons={buttonDefs}
+                                    setModuleParam={setModuleParam}
+                                    onLoadSoundtrack={loadRaidSoundtrack}
+                                    onClose={() => setIsRaidOpen(false)}
+                                />
+                            )}
                         </div>
                     )}
                     <BottomPanel
